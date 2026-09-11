@@ -171,6 +171,7 @@ class Database:
                 users_list.append(doc)
             return users_list
 
+        users_list = []
         for uid, doc in self.fallback.users.items():
             u_copy = dict(doc)
             u_copy["id"] = uid

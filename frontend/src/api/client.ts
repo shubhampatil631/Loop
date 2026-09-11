@@ -2,7 +2,7 @@ const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && impor
   ? import.meta.env.VITE_API_BASE_URL
   : (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
     ? 'http://127.0.0.1:8000'
-    : '';
+    : 'https://loop-backend-4kix.onrender.com';
 
 export interface VocabItem {
   id: string;
