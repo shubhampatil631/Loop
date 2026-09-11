@@ -33,6 +33,7 @@ class Settings:
         CHROMA_PERSIST_DIR: str = str(Path(__file__).resolve().parent.parent / "chroma_data")
 
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    ENABLE_CHROMA: bool = os.getenv("ENABLE_CHROMA", "false" if os.getenv("ENV") == "production" else "true").lower() in ("true", "1", "yes")
     TARGET_LANGUAGE: str = os.getenv("TARGET_LANGUAGE", "es")
     ENV: str = os.getenv("ENV", "development")
 

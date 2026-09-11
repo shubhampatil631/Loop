@@ -34,6 +34,11 @@ class VocabStore:
         self._init_store()
 
     def _init_store(self):
+        if not settings.ENABLE_CHROMA:
+            print("[RAG] ChromaDB disabled (low-memory mode). Using high-speed in-memory CEFR vocabulary RAG.")
+            self._auto_seed()
+            return
+
         try:
             import chromadb
             from chromadb.config import Settings as ChromaSettings
