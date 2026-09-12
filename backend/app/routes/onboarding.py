@@ -5,6 +5,7 @@ from app.models.schemas import (
 )
 from app.models.db import db
 from app.agents.placement import assess_placement_turn
+from app.agents.error_analysis import analyze_learner_errors
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 
@@ -21,7 +22,6 @@ def onboarding_start(req: OnboardingStartRequest):
 
         placement_session = db.create_session(user_id=user_id, mode="placement")
         sess_id = placement_session["id"]
-
 
         greeting = f"¡Hola {req.name}! Bienvenido a Loop. Dime, ¿cómo te llamas y por qué te gustaría aprender español?"
         db.update_session(sess_id, {
@@ -53,10 +53,25 @@ def onboarding_placement_turn(req: PlacementTurnRequest):
         learner_text=req.learner_text
     )
 
+    # Analyze errors on placement turns
+    new_mistakes = analyze_learner_errors(
+        user_id=user_id,
+        learner_text=req.learner_text,
+        level=user.get("level", "A1"),
+        target_language=target_lang
+    )
+
     history.append({"role": "learner", "text": req.learner_text})
     history.append({"role": "agent", "text": result["agent_text"]})
 
-    updates = {"turns": history}
+    existing_mistakes = sess.get("mistakes_tagged", [])
+    new_tag_ids = [m["id"] for m in new_mistakes if m.get("id")]
+    all_tagged = list(set(existing_mistakes + new_tag_ids))
+
+    updates = {
+        "turns": history,
+        "mistakes_tagged": all_tagged
+    }
     if result["placement_complete"]:
         updates["is_ended"] = True
         level = result.get("level", "A1")

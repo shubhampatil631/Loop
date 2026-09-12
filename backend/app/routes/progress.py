@@ -22,10 +22,6 @@ def get_progress(user_id: str = Query(..., description="User ID")):
 
     graduated = len([v for v in all_vocab if v.get("reps", 0) >= 3 and v.get("ease_factor", 2.5) >= 2.4])
     in_progress = len([v for v in all_vocab if (v.get("reps", 0) > 0 and (v.get("reps", 0) < 3 or v.get("ease_factor", 2.5) < 2.4)) or v.get("last_reviewed_at") is not None])
-    
-    # If starting fresh, untouched starter words count as in-progress foundation
-    if in_progress == 0 and graduated == 0 and all_vocab:
-        in_progress = len(all_vocab)
 
     total_words = max(1, len(all_vocab))
     total_sessions_count = len(sessions)
@@ -33,19 +29,7 @@ def get_progress(user_id: str = Query(..., description="User ID")):
 
     # Base level baseline calibration
     lvl = (user.get("level") or "A1").upper()
-    baseline = 0.25 if lvl == "A1" else 0.45 if lvl == "A2" else 0.70 if lvl == "B1" else 0.85
-
-    # Progression contribution
-    vocab_ratio = (graduated * 1.0 + in_progress * 0.4) / total_words
-    session_boost = min(0.35, total_sessions_count * 0.04)
-    mastery_score = round(min(1.0, max(0.15, (baseline * 0.35) + (vocab_ratio * 0.35) + session_boost)), 2)
-
-    # Average FSRS retention rate across vocab
-    if all_vocab:
-        avg_ease = sum(float(v.get("ease_factor", 2.5)) for v in all_vocab) / len(all_vocab)
-        retention_rate = min(99, max(75, round((avg_ease / 2.7) * 92)))
-    else:
-        retention_rate = 92
+    baseline = 0.15 if lvl == "A1" else 0.35 if lvl == "A2" else 0.60 if lvl == "B1" else 0.80
 
     # Accuracy rate from total dialogue turns vs mistakes
     total_learner_turns = sum(len([t for t in s.get("turns", []) if t.get("role") == "learner"]) for s in sessions)
@@ -55,6 +39,22 @@ def get_progress(user_id: str = Query(..., description="User ID")):
         accuracy_rate = 100
     else:
         accuracy_rate = max(0, 100 - total_mistakes_count * 10)
+
+    # Honest mastery score calibration
+    if graduated == 0 and in_progress == 0:
+        mastery_score = 0.05
+    else:
+        vocab_ratio = (graduated * 1.0 + in_progress * 0.4) / total_words
+        session_boost = min(0.30, total_sessions_count * 0.03) if accuracy_rate >= 50 else 0.0
+        mastery_score = round(min(1.0, max(0.05, (baseline * 0.20) + (vocab_ratio * 0.50) + session_boost)), 2)
+
+    # Average FSRS retention rate across practiced vocab
+    practiced_vocab = [v for v in all_vocab if v.get("reps", 0) > 0 or v.get("last_reviewed_at") is not None]
+    if practiced_vocab:
+        avg_ease = sum(float(v.get("ease_factor", 2.5)) for v in practiced_vocab) / len(practiced_vocab)
+        retention_rate = min(99, max(50, round((avg_ease / 2.7) * 90)))
+    else:
+        retention_rate = 70 if total_sessions_count > 0 else 75
 
     return ProgressResponse(
         mastery_score=mastery_score,

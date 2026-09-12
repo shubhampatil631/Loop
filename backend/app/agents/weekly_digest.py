@@ -26,6 +26,21 @@ def generate_weekly_digest(user_id: str) -> Dict[str, Any]:
             if t.get("role") == "learner" and t.get("text"):
                 recent_dialogue.append(t["text"])
 
+    # Check if learner has real multi-word conversational substance
+    meaningful_turns = [
+        d for d in recent_dialogue
+        if len(d.strip().split()) >= 2 and d.strip().lower() not in {"no no", "si si", "ok ok"}
+    ]
+
+    graduated_count = len([v for v in all_vocab if v.get("reps", 0) >= 3])
+
+    if not meaningful_turns and graduated_count == 0:
+        return {
+            "summary": "You have completed initial onboarding sessions. To accelerate your Spanish progress, practice using full conversational phrases (such as 'Me llamo...', 'Quiero un café', or 'Muchas gracias') in your daily roleplays.",
+            "strength": f"Initiated foundational Spanish onboarding in '{user.get('goal', 'travel')}' topics",
+            "focus_area": "Forming complete beginner sentences and greetings"
+        }
+
     dialogue_sample = "; ".join([f'"{d}"' for d in recent_dialogue[-6:]]) if recent_dialogue else "none"
 
     mistake_items = []
@@ -39,7 +54,6 @@ def generate_weekly_digest(user_id: str) -> Dict[str, Any]:
             mistake_items.append(f"[{etype}] '{ex}' -> target: '{corr}'")
 
     most_common_error = max(mistake_counts, key=mistake_counts.get) if mistake_counts else "none"
-    graduated_count = len([v for v in all_vocab if v.get("reps", 0) >= 3])
     mistakes_str = " | ".join(mistake_items[:3]) if mistake_items else "no major errors"
 
     from app.llm import call_llm
@@ -49,28 +63,29 @@ def generate_weekly_digest(user_id: str) -> Dict[str, Any]:
 - Recent spoken Spanish phrases: {dialogue_sample}
 - Specific mistakes & target corrections: {mistakes_str}
 
-CRITICAL REQUIREMENT: You MUST write the entire report in clear, encouraging ENGLISH. Do not write the explanation in Spanish.
+CRITICAL ACCURACY RULES:
+1. Write the entire report in clear, encouraging ENGLISH.
+2. HONEST EVALUATION: NEVER praise single-word non-answers (e.g. 'no', 'si', 'ok') as accomplishments. If the learner has only spoken minimal words, honestly advise them to practice full phrases.
+3. If they have practiced real phrases, acknowledge their actual communicative effort and provide constructive guidance on their specific error pattern ({most_common_error.replace('_', ' ')}).
 
-Write a tailored 2-sentence feedback report in English:
-Sentence 1: Praise a specific positive communicative accomplishment from their spoken phrases in English.
-Sentence 2: Offer constructive guidance in English on their specific error pattern (e.g. {most_common_error.replace('_', ' ')}) with a clear explanation and helpful tip (quoting Spanish examples in quotes if needed)."""
+Write a tailored 2-sentence feedback report in English."""
 
     llm_res = call_llm(prompt="Generate personalized weekly feedback report in English", system_instruction=system_prompt, temperature=0.3)
     if llm_res:
         return {
             "summary": llm_res.strip(),
-            "strength": f"Demonstrated active communication in '{user.get('goal', 'travel')}' scenarios with {graduated_count} mastered lexemes",
-            "focus_area": most_common_error.replace('_', ' ') if most_common_error != "none" else "Vocabulary breadth and complex tenses"
+            "strength": f"Practiced conversational communication in '{user.get('goal', 'travel')}' scenarios ({graduated_count} mastered lexemes)" if graduated_count > 0 else f"Initiated conversational practice in '{user.get('goal', 'travel')}' scenarios",
+            "focus_area": most_common_error.replace('_', ' ') if most_common_error != "none" else "Vocabulary breadth and sentence structures"
         }
 
     # Fallback heuristic summary
     if most_common_error != "none":
-        summary = f"You demonstrated great conversational initiative and solidified {graduated_count} core vocabulary items. For your next sessions, pay special attention to {most_common_error.replace('_', ' ')} when forming spontaneous sentences."
+        summary = f"You practiced conversational roleplays and worked on your core vocabulary. For your next sessions, pay special attention to {most_common_error.replace('_', ' ')} when forming spontaneous sentences."
     else:
-        summary = f"You maintained excellent grammatical consistency throughout your recent roleplays with {graduated_count} vocabulary items mastered. Keep up the consistent daily conversational practice!"
+        summary = f"You completed your conversational practice sessions with {graduated_count} vocabulary items mastered. Keep practicing regularly to build sentence fluency!"
 
     return {
         "summary": summary,
-        "strength": f"Solidified {graduated_count} core vocabulary items with active recall",
+        "strength": f"Solidified {graduated_count} core vocabulary items with active recall" if graduated_count > 0 else "Engaged with daily interactive conversational practice",
         "focus_area": most_common_error.replace('_', ' ') if most_common_error != "none" else "Expanding vocabulary breadth"
     }
