@@ -50,11 +50,11 @@ def get_progress(user_id: str = Query(..., description="User ID")):
     # Accuracy rate from total dialogue turns vs mistakes
     total_learner_turns = sum(len([t for t in s.get("turns", []) if t.get("role") == "learner"]) for s in sessions)
     if total_learner_turns > 0:
-        accuracy_rate = max(50, min(100, round(((total_learner_turns - total_mistakes_count) / total_learner_turns) * 100)))
+        accuracy_rate = max(0, min(100, round(((total_learner_turns - total_mistakes_count) / total_learner_turns) * 100)))
     elif total_mistakes_count == 0:
         accuracy_rate = 100
     else:
-        accuracy_rate = max(60, 100 - total_mistakes_count * 10)
+        accuracy_rate = max(0, 100 - total_mistakes_count * 10)
 
     return ProgressResponse(
         mastery_score=mastery_score,

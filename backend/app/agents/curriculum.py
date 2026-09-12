@@ -82,7 +82,7 @@ class CurriculumAgent:
         }
 
         words_closer = 0
-        all_user_vocab = db.get_all_user_vocab(user_id)
+        all_user_vocab = db.get_all_user_vocab(user_id) if user_id else []
         updated_items: List[VocabItem] = []
 
         for item in all_user_vocab:
@@ -103,19 +103,6 @@ class CurriculumAgent:
                 if updated:
                     updated_items.append(updated)
 
-        # Fallback: if no specific items were tagged as touched, update top 2-3 due items
-        if not updated_items and all_user_vocab:
-            sample_size = max(1, min(3, max(1, turn_count)))
-            for item in all_user_vocab[:sample_size]:
-                item_id = item.get("id") or item.get("_id")
-                lemma = (item.get("lemma") or "").lower().strip()
-                outcome = "incorrect" if lemma in mistake_lemmas else "correct"
-                if outcome == "correct":
-                    words_closer += 1
-                updated = schedule_next_review(user_id=user_id, vocab_item_id=item_id, outcome=outcome)
-                if updated:
-                    updated_items.append(updated)
-
         # Calculate next review ETA as the minimum due_at among scheduled items
         if updated_items:
             earliest_due = min(item.due_at for item in updated_items)
@@ -123,19 +110,34 @@ class CurriculumAgent:
         else:
             next_eta = datetime.utcnow() + timedelta(days=1)
 
-        # Calculate mastery delta: positive for correct items, slight penalty for mistakes
-        mastery_delta = round(max(0.01, (words_closer * 0.02) - (len(tagged_mistakes) * 0.01)), 3)
-
-        # Calculate real accuracy and stability metrics
         actual_turns = max(1, turn_count)
         mistake_count = len(tagged_mistakes)
-        accuracy_percentage = max(50, min(100, round(((actual_turns - mistake_count) / actual_turns) * 100))) if actual_turns >= mistake_count else max(50, 100 - mistake_count * 15)
 
-        avg_ease = sum(v.ease_factor for v in updated_items) / len(updated_items) if updated_items else 2.5
-        stability_delta_str = f"+{round(avg_ease - 2.4, 2):.2f}x" if avg_ease >= 2.4 else f"{round(avg_ease - 2.5, 2):.2f}x"
+        # Realistic Accuracy Calculation
+        if mistake_count == 0 and words_closer > 0:
+            accuracy_percentage = 100
+        elif mistake_count == 0 and words_closer == 0:
+            accuracy_percentage = 85 if actual_turns > 0 else 100
+        else:
+            accuracy_percentage = max(0, min(100, round(((actual_turns - mistake_count) / actual_turns) * 100)))
 
-        # FSRS recall retention probability R = e^(-t / S)
-        recall_probability = min(99, max(75, 95 - (mistake_count * 4) + (words_closer * 2)))
+        # Mastery growth delta (0.00 if performance was poor or 0 words solidified)
+        if words_closer == 0 or accuracy_percentage < 50:
+            mastery_delta = 0.00
+        else:
+            mastery_delta = round(max(0.00, (words_closer * 0.025) - (mistake_count * 0.015)), 3)
+
+        # Stability factor delta calibration
+        if accuracy_percentage < 50:
+            stability_delta_str = "-0.15x"
+            recall_probability = max(25, min(60, round(accuracy_percentage * 0.85)))
+        elif accuracy_percentage < 75:
+            stability_delta_str = "+0.00x"
+            recall_probability = max(60, min(80, round(accuracy_percentage * 0.95)))
+        else:
+            avg_ease = sum(v.ease_factor for v in updated_items) / len(updated_items) if updated_items else 2.5
+            stability_delta_str = f"+{round(avg_ease - 2.4, 2):.2f}x" if avg_ease >= 2.4 else f"{round(avg_ease - 2.5, 2):.2f}x"
+            recall_probability = min(99, max(85, 90 + (words_closer * 2) - (mistake_count * 3)))
 
         user = db.get_user(user_id) if user_id else {}
         next_scenario = self.get_next_scenario(
@@ -147,7 +149,7 @@ class CurriculumAgent:
         return {
             "mastery_delta": mastery_delta,
             "next_review_eta": next_eta,
-            "words_closer_to_fluent": max(1, words_closer),
+            "words_closer_to_fluent": words_closer,
             "updated_items_count": len(updated_items),
             "accuracy_percentage": accuracy_percentage,
             "stability_factor_delta": stability_delta_str,

@@ -23,6 +23,9 @@ def clean_llm_output(text: str) -> str:
     return cleaned if cleaned else text.strip()
 
 
+_last_ollama_failure = 0.0
+OLLAMA_FAILURE_COOLDOWN = 45.0  # seconds to bypass Ollama if it previously timed out or was offline
+
 def call_llm(
     prompt: str,
     system_instruction: str = "",
@@ -36,11 +39,14 @@ def call_llm(
     2. Groq cloud models: openai/gpt-oss-20b -> openai/gpt-oss-120b -> qwen/qwen3.8-27b -> qwen/qwen3.6-27b
     3. Gemini cloud models: gemini-flash-latest -> gemini-2.5-flash-lite -> gemini-pro-latest
     """
+    global _last_ollama_failure
+    import time
+    now = time.time()
 
     # -------------------------------------------------------------
     # 1. PRIMARY: Ollama (Local multi-model fallback chain)
     # -------------------------------------------------------------
-    if settings.OLLAMA_HOST:
+    if settings.OLLAMA_HOST and (now - _last_ollama_failure > OLLAMA_FAILURE_COOLDOWN):
         models_to_try = getattr(settings, "OLLAMA_MODELS", None) or [settings.OLLAMA_MODEL]
         ollama_timeout = min(float(getattr(settings, "OLLAMA_TIMEOUT", 3.5)), 3.5)
         ollama_keep_alive = getattr(settings, "OLLAMA_KEEP_ALIVE", "30m")
@@ -60,7 +66,7 @@ def call_llm(
                 if json_mode:
                     payload["format"] = "json"
 
-                with httpx.Client(timeout=httpx.Timeout(connect=1.5, read=ollama_timeout, write=3.0, pool=3.0)) as client:
+                with httpx.Client(timeout=httpx.Timeout(connect=1.0, read=ollama_timeout, write=2.0, pool=2.0)) as client:
                     res = client.post(url, json=payload)
                     if res.status_code == 200:
                         data = res.json()
@@ -70,10 +76,13 @@ def call_llm(
                     else:
                         print(f"[LLM] Ollama ({model_candidate}) returned status {res.status_code}: {res.text}")
             except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError) as timeout_err:
-                print(f"[LLM] Ollama ({model_candidate}) timeout ({timeout_err}). Cascading immediately to cloud tier.")
+                _last_ollama_failure = time.time()
+                print(f"[LLM] Ollama ({model_candidate}) unavailable ({timeout_err}). Cooling down for {int(OLLAMA_FAILURE_COOLDOWN)}s; cascading to cloud.")
                 break
             except Exception as e:
+                _last_ollama_failure = time.time()
                 print(f"[LLM] Ollama ({model_candidate}) fallback: {e}")
+                break
 
     # -------------------------------------------------------------
     # 2. SECONDARY: Groq (Ultra low-latency cloud fallback)

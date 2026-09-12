@@ -1,7 +1,7 @@
 from typing import TypedDict, List, Dict, Any, Optional, Literal
 from app.agents.placement import assess_placement_turn
 from app.agents.conversation import generate_conversation_turn
-from app.agents.error_analysis import analyze_learner_errors
+from app.agents.error_analysis import analyze_learner_errors, is_unintelligible_or_gibberish
 from app.agents.curriculum import curriculum_agent
 from app.agents.review_recall import generate_recall_prompt
 from app.models.db import db
@@ -60,17 +60,11 @@ def curriculum_pull_node(state: LoopState) -> Dict[str, Any]:
     user_id = state.get("user_id", "")
     due_items = curriculum_agent.get_session_due_items(user_id=user_id, limit=3)
     retrigger_mistakes = curriculum_agent.get_retrigger_mistakes(user_id=user_id, limit=2)
-    
-    touched = list(state.get("items_touched", []))
-    for d in due_items:
-        d_id = d.get("id") or d.get("_id")
-        if d_id and d_id not in touched:
-            touched.append(d_id)
 
     return {
         "due_items": due_items,
         "tagged_mistakes": retrigger_mistakes,
-        "items_touched": touched
+        "items_touched": list(state.get("items_touched", []))
     }
 
 def conversation_node(state: LoopState) -> Dict[str, Any]:
@@ -285,7 +279,7 @@ def orchestrate_session_start(user_id: str, mode: str = "daily_loop") -> Dict[st
 
 def extract_and_track_learner_vocab(user_id: str, text: str, theme: str = "travel", level: str = "A1") -> List[str]:
     """Scans learner text for Spanish vocabulary items and tracks them in MongoDB."""
-    if not user_id or not text:
+    if not user_id or not text or is_unintelligible_or_gibberish(text):
         return []
     
     text_lower = text.lower()

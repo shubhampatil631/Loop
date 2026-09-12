@@ -1,6 +1,9 @@
 from typing import Dict, Any, Optional
+import re
 from app.config import settings
 from app.models.schemas import OutcomeType
+from app.llm import call_llm
+from app.agents.error_analysis import is_unintelligible_or_gibberish
 
 FALLBACK_PROMPT_TEMPLATES = {
     "el café": "You're sitting at a terrace in Barcelona and want to order a coffee. What do you say to the waiter?",
@@ -12,8 +15,6 @@ FALLBACK_PROMPT_TEMPLATES = {
     "el hotel": "You are in a taxi looking for where you are staying for the night. How do you ask to go there?",
     "el baño": "You need to find the restroom in a museum. What do you ask?"
 }
-
-from app.llm import call_llm
 
 def generate_recall_prompt(
     lemma: str,
@@ -39,7 +40,6 @@ Example format:
     if prompt_res:
         return prompt_res.strip().strip('"')
 
-
     lemma_clean = lemma.lower().strip()
     if lemma_clean in FALLBACK_PROMPT_TEMPLATES:
         return FALLBACK_PROMPT_TEMPLATES[lemma_clean]
@@ -51,8 +51,19 @@ def evaluate_recall_response(target_lemma: str, learner_text: str) -> Dict[str, 
     Evaluates whether the learner's response correctly incorporated the target recall item.
     Returns {outcome: OutcomeType, is_correct: bool, feedback: str}.
     """
-    clean_target = target_lemma.lower().replace("el ", "").replace("la ", "").replace("un ", "").replace("una ", "").strip()
+    if not learner_text or not learner_text.strip() or is_unintelligible_or_gibberish(learner_text):
+        return {
+            "outcome": "incorrect",
+            "is_correct": False,
+            "feedback": f"The response was unintelligible. The target expression was '{target_lemma}'."
+        }
+
+    clean_target = target_lemma.lower().replace("el ", "").replace("la ", "").replace("un ", "").replace("una ", "").replace("los ", "").replace("las ", "").strip()
     clean_input = learner_text.lower().strip()
+
+    # Spanish grammatical stop words that should not trigger false positive matches
+    stop_words = {"el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "al", "en", "a", "por", "para", "con", "y", "o", "no", "si", "sí"}
+    target_tokens = [t for t in re.findall(r"[a-záéíóúüñ]+", clean_target) if t not in stop_words and len(t) >= 3]
 
     if clean_target in clean_input:
         return {
@@ -60,7 +71,7 @@ def evaluate_recall_response(target_lemma: str, learner_text: str) -> Dict[str, 
             "is_correct": True,
             "feedback": f"¡Excelente! You correctly recalled and used '{target_lemma}'."
         }
-    elif any(token in clean_input for token in clean_target.split()):
+    elif target_tokens and any(token in clean_input for token in target_tokens):
         return {
             "outcome": "hesitated",
             "is_correct": True,

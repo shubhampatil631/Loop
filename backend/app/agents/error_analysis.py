@@ -8,6 +8,59 @@ from app.tools.mcp_tools import log_error_tag
 VALID_ERROR_TYPES = {"gender_agreement", "conjugation", "word_order", "false_friend", "other"}
 VALID_SEVERITIES = {"low", "medium", "high"}
 
+# Common Spanish words for communicative grounding check
+COMMON_SPANISH_WORDS = {
+    "hola", "buenos", "días", "tardes", "noches", "por", "favor", "gracias", "de", "nada",
+    "quiero", "quisiera", "gustaría", "necesito", "tengo", "hay", "dónde", "está", "están",
+    "cómo", "cuánto", "cuesta", "vale", "un", "una", "el", "la", "los", "las", "este", "esta",
+    "café", "agua", "té", "cuenta", "boleto", "billete", "tren", "estación", "hotel", "menú",
+    "comida", "carta", "mesa", "baño", "sí", "no", "bien", "adiós", "hasta", "luego", "yo",
+    "tú", "usted", "nosotros", "ellos", "hablo", "habla", "español", "inglés", "perdón", "disculpe",
+    "ayuda", "puedo", "puede", "pagar", "tarjeta", "efectivo", "leche", "frío", "caliente", "muy"
+}
+
+def is_unintelligible_or_gibberish(text: str) -> bool:
+    """
+    Detects if an input is keyboard smashing, pure gibberish, non-alphanumeric noise,
+    or lacking minimal communicative Spanish validity.
+    """
+    if not text:
+        return True
+    
+    cleaned = text.strip().lower()
+    words = re.findall(r"[a-záéíóúüñ]+", cleaned)
+    
+    if not words:
+        # Only numbers, punctuation, or whitespace
+        return True
+    
+    # 1. Check for single-character or repetitive spam e.g., 'aaaaaa', 'asdasdasd', 'qwerty'
+    full_str = "".join(words)
+    if len(full_str) > 4:
+        # Check repeated identical letters (e.g., 'aaaaa')
+        if re.search(r"(.)\1{3,}", full_str):
+            return True
+        # Check repetitive bigrams (e.g., 'asdasdasd', 'qweqweqwe')
+        if re.search(r"([a-z]{2,3})\1{2,}", full_str):
+            return True
+        
+    # 2. Check consonant-to-vowel ratio (Spanish and romance languages have high vowel density ~40-50%)
+    vowels = len(re.findall(r"[aeiouáéíóúü]", full_str))
+    total_letters = len(full_str)
+    if total_letters >= 5 and (vowels == 0 or (vowels / total_letters) < 0.18):
+        return True
+    
+    # 3. Check for keyboard mash sequences or 5+ consecutive consonants
+    mash_patterns = [
+        r"(?:asdf|ghjk|qwerty|zxcv|dfgh|hjkl|jklñ|qwer|werty|yuiop|asdfg|zxcvb)",
+        r"\b[bcdfghjklmnpqrstvwxyzñ]{5,}\b"
+    ]
+    for pat in mash_patterns:
+        if re.search(pat, cleaned):
+            return True
+
+    return False
+
 def normalize_error_type(raw_type: str) -> str:
     """Normalizes error type to one of the 5 canonical CEFR categories."""
     raw = (raw_type or "").lower().strip().replace("-", "_").replace(" ", "_")
@@ -35,9 +88,35 @@ def call_analysis_llm(prompt: str, system_instruction: str) -> str:
 
 
 def rule_based_spanish_error_analysis(text: str) -> List[Dict[str, Any]]:
-    """Comprehensive deterministic rule-based analysis for Spanish errors."""
+    """Comprehensive deterministic rule-based analysis for Spanish errors and gibberish."""
     detected = []
-    txt_lower = text.lower()
+    txt_lower = text.lower().strip()
+
+    # 0. Check for gibberish, keyboard mash, or unintelligible input
+    if is_unintelligible_or_gibberish(txt_lower):
+        detected.append({
+            "vocab_item": None,
+            "error_type": "other",
+            "severity": "high",
+            "correction": "Por favor, responde usando frases comprensibles en español.",
+            "explanation": f"El texto ingresado ('{text[:30]}') no contiene español comprensible o contiene caracteres aleatorios."
+        })
+        return detected
+
+    words = re.findall(r"[a-záéíóúüñ]+", txt_lower)
+    # Check for pure non-Spanish / English sentences when Spanish is expected
+    if len(words) >= 2:
+        has_spanish = any(w in COMMON_SPANISH_WORDS for w in words)
+        english_markers = {"i", "you", "the", "a", "an", "is", "are", "want", "please", "can", "hello", "my", "what", "where", "how", "give", "me", "nonsense", "test"}
+        if not has_spanish and any(w in english_markers for w in words):
+            detected.append({
+                "vocab_item": None,
+                "error_type": "other",
+                "severity": "high",
+                "correction": "Intenta responder en español (ej. 'Quiero pedir un café, por favor').",
+                "explanation": "La respuesta no está en español. Intenta formular tu mensaje en el idioma objetivo."
+            })
+            return detected
 
     # 1. Gender Agreement Errors
     if "la problema" in txt_lower or "una problema" in txt_lower:
@@ -196,11 +275,42 @@ def analyze_learner_errors(
     Normalizes categories to {"gender_agreement", "conjugation", "word_order", "false_friend", "other"},
     links mistakes to known user vocab items, logs them via MCP tool, and returns tagged errors.
     """
-    if not learner_text or len(learner_text.strip().split()) < 2:
-        # Edge case: Avoid false positives on single-word responses
+    if not learner_text or not learner_text.strip():
         return []
 
-    system_prompt = f"""You are a precise Spanish language error classifier. Given one learner turn at CEFR level {level}, identify grammatical and lexical errors ONLY from this canonical set:
+    # If the input is unintelligible gibberish, immediately tag as an error
+    if is_unintelligible_or_gibberish(learner_text):
+        gibberish_errors = rule_based_spanish_error_analysis(learner_text)
+        logged = []
+        for err in gibberish_errors:
+            tag_id = log_error_tag(
+                user_id=user_id,
+                vocab_item_id=None,
+                error_type="other",
+                severity="high",
+                example_turn=learner_text,
+                correction=err.get("correction"),
+                explanation=err.get("explanation")
+            )
+            logged.append({
+                "id": tag_id,
+                "vocab_item_id": None,
+                "vocab_item": None,
+                "error_type": "other",
+                "severity": "high",
+                "correction": err.get("correction"),
+                "explanation": err.get("explanation"),
+                "example_turn": learner_text
+            })
+        return logged
+
+    # Legitimate short valid conversational replies (e.g. "Sí", "Hola", "Gracias")
+    if len(learner_text.strip().split()) < 2:
+        words = re.findall(r"[a-záéíóúüñ]+", learner_text.lower())
+        if any(w in COMMON_SPANISH_WORDS for w in words):
+            return []
+
+    system_prompt = f"""You are a precise Spanish language error classifier. Given one learner turn at CEFR level {level}, identify grammatical, lexical, or unintelligible errors ONLY from this canonical set:
 - gender_agreement
 - conjugation
 - word_order
@@ -211,18 +321,19 @@ Output a JSON object with this EXACT structure:
 {{
   "errors": [
     {{
-      "vocab_item": "the specific word/lemma involved if any, e.g. el problema, el café, querer",
+      "vocab_item": "the specific word/lemma involved if any, e.g. el problema, el café, querer, or null",
       "error_type": "gender_agreement|conjugation|word_order|false_friend|other",
       "severity": "low|medium|high",
-      "correction": "the corrected target phrase or sentence",
-      "explanation": "one clear sentence explaining the grammatical rule"
+      "correction": "the corrected target phrase or sentence in Spanish",
+      "explanation": "one clear sentence explaining the grammatical or linguistic issue"
     }}
   ]
 }}
 
 RULES:
-- If there are no errors, output: {{"errors": []}}
-- Do not flag stylistic variations or informal greetings as errors — only clear grammatical/lexical mistakes.
+- CRITICAL: If the learner's text is gibberish, random keyboard smash (e.g., asdfghjkl), completely unintelligible, purely non-Spanish/English when Spanish is expected, or nonsensical, you MUST tag it with error_type: "other", severity: "high", correction: "Por favor, responde usando frases comprensibles en español.", explanation: "The input was unintelligible, random characters, or not in Spanish."
+- If there are no errors in a valid Spanish sentence, output: {{"errors": []}}
+- Do not flag natural conversational Spanish or informal greetings as errors.
 - Always output valid JSON with an "errors" list."""
 
     user_prompt = f"Learner input: \"{learner_text}\""

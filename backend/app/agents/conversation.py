@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional
 from app.config import settings
 from app.tools.mcp_tools import fetch_level_vocab
 from app.llm import call_llm
+from app.agents.error_analysis import is_unintelligible_or_gibberish
 
 def call_conversation_llm(prompt: str, system_instruction: str) -> str:
     """Call LLM with Ollama -> Groq -> Gemini fallback."""
@@ -49,9 +50,10 @@ CRITICAL RAG GROUNDING CONSTRAINTS:
 2. Use the following retrieved in-level reference vocabulary and sentences as your stylistic and lexical anchor:
 {vocab_str}
 
-REPETITION & DRILL INSTRUCTIONS:
+REPETITION, DRILL & GROUNDING INSTRUCTIONS:
 - Naturally work in these spaced-repetition target words if a natural opening arises: {due_str}.
 - If a natural opening arises, prompt the learner to use one of these structures they've previously struggled with: {mistakes_str}.
+- GROUNDING & NONSENSE HANDLING: If the learner says something unintelligible, random keyboard smash, purely in English, or nonsensical, DO NOT pretend they spoke fluent Spanish. Instead, stay in character, politely mention in simple Spanish that you didn't understand (e.g., "Disculpa, no te entendí bien..."), and provide a simple hint or example option.
 - Keep each turn to 1-2 short, natural sentences in character as {persona}.
 - Do NOT break character to explain grammar or translate unless specifically asked in-character."""
 
@@ -80,7 +82,14 @@ REPETITION & DRILL INSTRUCTIONS:
                 reply = f"¡Hola! Qué gusto saludarte. ¿Cómo estás hoy?"
         else:
             txt = (latest_learner_text or "").lower()
-            if "café" in txt or "pedir" in txt or "quiero" in txt or "por favor" in txt:
+            if is_unintelligible_or_gibberish(txt):
+                if theme in ["travel", "station"]:
+                    reply = "Disculpa, no te he entendido. ¿Podrías repetirlo en español? Por ejemplo: 'Necesito un billete de tren'."
+                elif theme in ["cafe", "food"]:
+                    reply = "Disculpa, no te comprendí bien. ¿Qué deseas pedir? Por ejemplo: 'Quiero un café, por favor'."
+                else:
+                    reply = "Disculpa, no te he entendido bien. ¿Podrías repetirlo en español, por favor?"
+            elif "café" in txt or "pedir" in txt or "quiero" in txt or "por favor" in txt:
                 reply = "¡Perfecto! ¿Te gustaría un café caliente o prefieres un agua mineral fría?"
             elif "gracias" in txt or "de nada" in txt:
                 reply = "¡Un placer atenderte! ¿Necesitas algo más para llevar?"
@@ -89,7 +98,7 @@ REPETITION & DRILL INSTRUCTIONS:
             elif "cuenta" in txt or "pagar" in txt:
                 reply = "Aquí tiene la cuenta. ¿Prefiere pagar con tarjeta de crédito o en efectivo?"
             else:
-                reply = "¡Muy bien! ¿En qué más puedo ayudarte hoy?"
+                reply = "Entendido. ¿Podrías darme más detalles en español, por favor?"
 
     return reply
 

@@ -105,8 +105,17 @@ export const SessionSummary: React.FC<SessionSummaryProps> = ({ summary, onConti
             <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               Linguistic Accuracy
             </span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: summary.mistakes_this_session.length === 0 ? 'var(--accent-emerald-light)' : 'var(--accent-amber-light)', color: summary.mistakes_this_session.length === 0 ? 'var(--accent-emerald)' : 'var(--accent-amber)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {summary.mistakes_this_session.length === 0 ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
+            <div style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '8px',
+              backgroundColor: (summary.accuracy_percentage ?? 100) >= 80 ? 'var(--accent-emerald-light)' : (summary.accuracy_percentage ?? 100) >= 50 ? 'var(--accent-amber-light)' : '#fee2e2',
+              color: (summary.accuracy_percentage ?? 100) >= 80 ? 'var(--accent-emerald)' : (summary.accuracy_percentage ?? 100) >= 50 ? 'var(--accent-amber)' : '#dc2626',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              {(summary.accuracy_percentage ?? 100) >= 80 ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
             </div>
           </div>
           <div style={{ fontSize: '2.2rem', fontWeight: 800, color: 'var(--text-main)' }}>
@@ -114,10 +123,14 @@ export const SessionSummary: React.FC<SessionSummaryProps> = ({ summary, onConti
               ? `${summary.accuracy_percentage}%`
               : summary.mistakes_this_session.length === 0
               ? '100%'
-              : `${Math.max(60, 100 - summary.mistakes_this_session.length * 15)}%`}
+              : `${Math.max(0, 100 - summary.mistakes_this_session.length * 25)}%`}
           </div>
           <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '8px' }}>
-            {summary.mistakes_this_session.length === 0 ? 'Flawless grammatical precision' : `${summary.mistakes_this_session.length} slips tracked for re-testing`}
+            {summary.mistakes_this_session.length === 0
+              ? (summary.accuracy_percentage ?? 100) >= 80
+                ? 'Flawless grammatical precision'
+                : 'Session completed with basic participation'
+              : `${summary.mistakes_this_session.length} slips tracked for re-testing`}
           </div>
         </div>
       </div>
@@ -139,14 +152,28 @@ export const SessionSummary: React.FC<SessionSummaryProps> = ({ summary, onConti
           </div>
 
           {summary.mistakes_this_session.length === 0 ? (
-            <div style={{ backgroundColor: 'var(--accent-emerald-light)', border: '1px solid #a7f3d0', borderRadius: '12px', padding: '24px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <CheckCircle2 size={32} color="var(--accent-emerald)" style={{ flexShrink: 0 }} />
+            <div style={{
+              backgroundColor: (summary.accuracy_percentage ?? 100) >= 80 ? 'var(--accent-emerald-light)' : 'var(--accent-amber-light)',
+              border: `1px solid ${(summary.accuracy_percentage ?? 100) >= 80 ? '#a7f3d0' : '#fde68a'}`,
+              borderRadius: '12px',
+              padding: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px'
+            }}>
+              {(summary.accuracy_percentage ?? 100) >= 80 ? (
+                <CheckCircle2 size={32} color="var(--accent-emerald)" style={{ flexShrink: 0 }} />
+              ) : (
+                <AlertTriangle size={32} color="var(--accent-amber)" style={{ flexShrink: 0 }} />
+              )}
               <div>
-                <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#065f46' }}>
-                  Flawless Conversational Precision!
+                <div style={{ fontWeight: 700, fontSize: '1.05rem', color: (summary.accuracy_percentage ?? 100) >= 80 ? '#065f46' : '#92400e' }}>
+                  {(summary.accuracy_percentage ?? 100) >= 80 ? 'Flawless Conversational Precision!' : 'Session Complete — Review Target Vocab'}
                 </div>
-                <div style={{ fontSize: '0.88rem', color: '#047857', marginTop: '4px', lineHeight: 1.5 }}>
-                  The Error Classifier agent did not detect any grammatical mismatches, incorrect verb conjugations, or unnatural phrasing in this session.
+                <div style={{ fontSize: '0.88rem', color: (summary.accuracy_percentage ?? 100) >= 80 ? '#047857' : '#78350f', marginTop: '4px', lineHeight: 1.5 }}>
+                  {(summary.accuracy_percentage ?? 100) >= 80
+                    ? 'The Error Classifier agent did not detect any grammatical mismatches, incorrect verb conjugations, or unnatural phrasing in this session.'
+                    : 'Practice using target Spanish vocabulary in your upcoming sessions to raise your accuracy and retention.'}
                 </div>
               </div>
             </div>
