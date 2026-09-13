@@ -223,7 +223,7 @@ export const api = {
   },
 
   async onboardingPlacementTurn(placement_session_id: string, learner_text: string) {
-    return request<{ agent_text: string; placement_complete: boolean; level?: 'A1' | 'A2' | 'B1'; notes?: string }>(
+    return request<{ agent_text: string; placement_complete: boolean; level?: 'A1' | 'A2' | 'B1' | 'B2'; notes?: string }>(
       '/onboarding/placement/turn',
       {
         method: 'POST',
